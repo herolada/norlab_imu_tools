@@ -34,6 +34,10 @@ public:
             Node("imu_and_wheel_odom_node")
     {
 //            ros::init(argc, argv, ROS_PACKAGE_NAME);
+
+        // tf2::Quaternion upside_down_q;
+        // upside_down_q.setRPY(0, 0, M_PI);
+
         double p_wheel_odom_expected_rate = 20.0;
         this->declare_parameter<std::string>("odom_frame", "odom");
         this->get_parameter("odom_frame", p_odom_frame_);
@@ -204,7 +208,9 @@ public:
     }
 
 private:
-    //frame names
+    bool flip_heading = false;
+    bool upside_down = false;
+    tf2::Quaternion upside_down_q;
     std::string p_odom_frame_;
     std::string p_base_frame_;
     //tf stuff
@@ -251,13 +257,41 @@ private:
 
     void imuMsgCallback(const sensor_msgs::msg::Imu& imu_msg)
     {
-//        tf2::quaternionMsgToTF(imu_msg.orientation, tmp_);
+        
+
         tf2::fromMsg(imu_msg.orientation, tmp_);
-        //tmp_ = tf2::Quaternion(0,0,0,1);
         if(std::isnan(tmp_.getX()) || std::isnan(tmp_.getY()) || std::isnan(tmp_.getZ()) || std::isnan(tmp_.getW()))
         {
             RCLCPP_WARN(this->get_logger(), "Received IMU message with NaN values, dropping");
             return;
+        }
+
+        double roll, pitch, yaw;
+        tf2::Matrix3x3 matrix(tmp_);
+        matrix.getRPY(roll, pitch, yaw);
+        
+        // if (flip_heading) {
+        //     // THIS ONLY IF WE WANT THE HEADING TO STAY THE SAME WHEN FLIPPED
+        //     if (abs(roll) > M_PI/2) {
+        //         // upside_down = true;
+        //         yaw = yaw + M_PI;
+        //         tmp_.setRPY(roll, pitch, yaw);
+        //     } else {
+        //         // upside_down = false;
+        //     }
+        // } else {            
+        //     if (abs(roll) > M_PI/2) {
+        //         upside_down = true;
+        //         upside_down_q.setRPY(roll, pitch, yaw + M_PI);
+        //     } else {
+        //         upside_down = false;
+        //     }
+        // }     
+        
+        if (abs(roll) > M_PI/2) {
+            upside_down = true;
+        } else {
+            upside_down = false;
         }
 
         tmp_ = mag_north_correction_ * tmp_ * imu_alignment_;
@@ -266,9 +300,9 @@ private:
         current_attitude = tmp_;
         if(p_force_2d_)
         {
-            const tf2::Matrix3x3 matrix(current_attitude);
-            double roll, pitch, yaw;
-            matrix.getRPY(roll, pitch, yaw);
+            // const tf2::Matrix3x3 matrix(current_attitude);
+            // double roll, pitch, yaw;
+            // matrix.getRPY(roll, pitch, yaw);
             current_attitude.setRPY(0.0, 0.0, yaw);
             transform_.setRotation(current_attitude);
         }
@@ -298,16 +332,32 @@ private:
             geometry_msgs::msg::Quaternion quat_msg;
             if(p_force_2d_)
             {
-                const tf2::Matrix3x3 matrix(current_attitude);
-                double roll, pitch, yaw;
-                matrix.getRPY(roll, pitch, yaw);
+                // const tf2::Matrix3x3 matrix(current_attitude);
+                // double roll, pitch, yaw;
+                // matrix.getRPY(roll, pitch, yaw);
                 current_attitude.setRPY(0.0, 0.0, yaw);
                 tf2::convert(current_attitude, quat_msg);
+                
             }
             else
             {
                 tf2::convert(current_attitude, quat_msg);
             }
+
+            // copy the x_rot,y_rot,z_rot covariance part from imu to 3d odom
+            for (int i = 0; i < 3; i++) {
+                odom_msg_.pose.covariance[21+i]  = imu_msg.orientation_covariance[0+i];
+                odom_msg_.pose.covariance[27+i]  = imu_msg.orientation_covariance[3+i];
+                odom_msg_.pose.covariance[33+i]  = imu_msg.orientation_covariance[6+i];
+                odom_msg_.twist.covariance[21+i] = imu_msg.angular_velocity_covariance[0+i];
+                odom_msg_.twist.covariance[27+i] = imu_msg.angular_velocity_covariance[3+i];
+                odom_msg_.twist.covariance[33+i] = imu_msg.angular_velocity_covariance[6+i];
+            }
+            // TODO: figure out how to compute covariance of z !
+            // for now:
+            odom_msg_.pose.covariance[14] = 1.;
+            odom_msg_.twist.covariance[14] = 1.;
+            
             odom_msg_.pose.pose.orientation = quat_msg;
 
             odom_msg_.pose.pose.position.x = current_position.x();
@@ -359,14 +409,28 @@ private:
             // body to world rotation
             tf2::Transform rotation_body_to_world;
             rotation_body_to_world.setOrigin(tf2::Vector3(0.0, 0.0, 0.0));      // no translation
-            rotation_body_to_world.setRotation(current_attitude);                          // current orientation
+            rotation_body_to_world.setRotation(current_attitude);
 
-
+            // if (flip_heading) {
+            //     rotation_body_to_world.setRotation(current_attitude);                          // current orientation
+            // } else {
+            //     if (upside_down) {
+            //         rotation_body_to_world.setRotation(upside_down_q);          // current orientation with yaw corrected
+            //     } else {
+            //         rotation_body_to_world.setRotation(current_attitude);       // current orientation
+            //     }
+            // }
+            
             // express the velocity in the world frame
             tf2::Vector3 velocity_in_world =
                     rotation_body_to_world * tf2::Vector3(wheel_odom_msg.twist.twist.linear.x * p_wheel_odom_vx_scale,
                                                           wheel_odom_msg.twist.twist.linear.y,
                                                           wheel_odom_msg.twist.twist.linear.z);
+            
+            if (upside_down) {
+                velocity_in_world = -velocity_in_world;
+            } else {
+            }
             // time increment
             double delta_t = (rclcpp::Time(wheel_odom_msg.header.stamp) - previous_w_odom_stamp).seconds();
 
@@ -397,8 +461,30 @@ private:
             current_linear_vel = tf2::Vector3(wheel_odom_msg.twist.twist.linear.x * p_wheel_odom_vx_scale,
                                               wheel_odom_msg.twist.twist.linear.y,
                                               wheel_odom_msg.twist.twist.linear.z);
-        }
 
+            if (upside_down) {
+                current_linear_vel = -current_linear_vel;          // current orientation with yaw corrected
+            } else {
+            }
+
+            // if (flip_heading) {
+
+            // } else {
+            //     if (upside_down) {
+            //         rotation_body_to_world.setRotation(upside_down_q);          // current orientation with yaw corrected
+            //     } else {
+            //         rotation_body_to_world.setRotation(current_attitude);       // current orientation
+            //     }
+            // }
+
+            // copy the x,y covariance part from wheel odom to 3d odom
+            for (int i = 0; i < 3; i++) {
+                odom_msg_.pose.covariance[0+i]  = wheel_odom_msg.pose.covariance[0+i];
+                odom_msg_.pose.covariance[6+i]  = wheel_odom_msg.pose.covariance[6+i];
+                odom_msg_.twist.covariance[0+i] = wheel_odom_msg.twist.covariance[0+i];
+                odom_msg_.twist.covariance[6+i] = wheel_odom_msg.twist.covariance[6+i];
+            }
+        }
         previous_w_odom_stamp = wheel_odom_msg.header.stamp;
     }
 };
