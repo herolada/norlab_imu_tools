@@ -57,7 +57,7 @@ public:
         // If odom required, advertize the publisher and prepare the constant parts of the message
         if(p_publish_odom_)
         {
-            imuAndWheelOdomPublisher = this->create_publisher<nav_msgs::msg::Odometry>(p_odom_topic_name_, 2);
+            imuAndWheelOdomPublisher = this->create_publisher<nav_msgs::msg::Odometry>(p_odom_topic_name_, rclcpp::SystemDefaultsQoS());
             odom_msg_.header.frame_id = p_odom_frame_;
 
             //set the position
@@ -99,7 +99,7 @@ public:
 
         std::string actual_topic_name = this->get_node_topics_interface()->resolve_topic_name("imu_topic", false);
 
-        auto sub = this->create_subscription<sensor_msgs::msg::Imu>("imu_topic", 1, [](const std::shared_ptr<const sensor_msgs::msg::Imu>&) {});
+        auto sub = this->create_subscription<sensor_msgs::msg::Imu>("imu_topic", rclcpp::SensorDataQoS(), [](const std::shared_ptr<const sensor_msgs::msg::Imu>&) {});
         auto response =  rclcpp::wait_for_message<sensor_msgs::msg::Imu, int64_t, std::milli>(imu_msg, sub, this->get_node_options().context(), 5s);
 
         if(response)
@@ -192,13 +192,13 @@ public:
         transform_.frame_id_ = p_odom_frame_;
         transform_msg_.child_frame_id = p_base_frame_;
 
-        wheelOdomSubscription = this->create_subscription<nav_msgs::msg::Odometry>("wheel_odom_topic", 10,
+        wheelOdomSubscription = this->create_subscription<nav_msgs::msg::Odometry>("wheel_odom_topic", rclcpp::SensorDataQoS(),
                                                                                    std::bind(
                                                                                            &imuAndWheelOdomNode::wheelOdomMsgCallback,
                                                                                            this,
                                                                                            std::placeholders::_1));
 
-        imuSubscription = this->create_subscription<sensor_msgs::msg::Imu>("imu_topic", 10,
+        imuSubscription = this->create_subscription<sensor_msgs::msg::Imu>("imu_topic", rclcpp::SensorDataQoS(),
                                                                            std::bind(
                                                                                    &imuAndWheelOdomNode::imuMsgCallback,
                                                                                    this,
