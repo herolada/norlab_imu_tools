@@ -269,7 +269,9 @@ private:
         double roll, pitch, yaw;
         tf2::Matrix3x3 matrix(tmp_);
         matrix.getRPY(roll, pitch, yaw);
-        
+
+        // RCLCPP_WARN(this->get_logger(), "IMU RPY: %f, %f, %f \n", roll, pitch, yaw);
+
         // if (flip_heading) {
         //     // THIS ONLY IF WE WANT THE HEADING TO STAY THE SAME WHEN FLIPPED
         //     if (abs(roll) > M_PI/2) {
@@ -292,6 +294,11 @@ private:
             upside_down = true;
         } else {
             upside_down = false;
+        }
+
+        // TODO: make sure this works correctly on real robot !!!
+        if (upside_down) {
+            tmp_.setRPY(roll, pitch, -yaw);
         }
 
         tmp_ = mag_north_correction_ * tmp_ * imu_alignment_;
