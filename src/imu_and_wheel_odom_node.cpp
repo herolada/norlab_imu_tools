@@ -137,7 +137,7 @@ public:
 //					'Warning: Invalid frame ID "imu" passed to canTransform argument target_frame - frame does not exist
 //					 at line 93 in ./src/buffer_core.cpp' show up in the log.
                 unsigned int ctr = 0;
-                const unsigned int ctr_max = 100;
+                const unsigned int ctr_max = 500;
                 auto sleep_duration_ms = 10ms;
                 while(!tf_buffer->_frameExists(imu_frame))
                 {
